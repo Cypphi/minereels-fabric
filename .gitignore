@@ -1,0 +1,35 @@
+.gradle/
+.kotlin/
+build/
+out/
+run/
+*.iml
+.idea/
+.vscode/
+.claude/
+.codex/
+.agents/
+
+# Eclipse / Buildship
+.project
+.classpath
+.settings/
+bin/
+
+# Local environment and diagnostics
+.env
+.env.*
+!.env.example
+*.log
+*.log.gz
+*.tmp
+*.bak
+hs_err_pid*
+replay_pid*
+*.hprof
+*.jfr
+
+AGENTS.md
+
+# Network captures may contain live credentials. Never commit them.
+*.har

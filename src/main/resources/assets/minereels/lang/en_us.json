@@ -1,0 +1,10 @@
+{
+	"modmenu.nameTranslation.minereels": "MineReels",
+	"modmenu.descriptionTranslation.minereels": "Scroll Instagram Reels in Minecraft.",
+	"key.minereels.controls": "MineReels",
+	"key.minereels.next-reel": "Next reel",
+	"key.minereels.previous-reel": "Previous reel",
+	"key.minereels.like-reel": "Like current reel",
+	"key.minereels.reel-action": "Reel action (1 tap next / 2 like / 3 previous)",
+	"key.minereels.toggle-overlay": "Toggle reel overlay"
+}
