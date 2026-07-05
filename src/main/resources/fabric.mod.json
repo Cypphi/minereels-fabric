@@ -1,0 +1,32 @@
+{
+	"schemaVersion": 1,
+	"id": "minereels",
+	"version": "${version}",
+	"name": "MineReels",
+	"description": "Scroll Instagram Reels in Minecraft.",
+	"authors": [
+		"cypphi"
+	],
+	"contact": {},
+	"license": "MIT",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"dev.cypphi.minereels.MineReels"
+		],
+		"client": [
+			"dev.cypphi.minereels.client.MineReelsClient"
+		],
+		"modmenu": [
+			"dev.cypphi.minereels.client.config.MineReelsModMenu"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.3",
+		"minecraft": "*",
+		"java": ">=21",
+		"fabric-api": "*",
+		"yet_another_config_lib_v3": "*",
+		"modmenu": "*"
+	}
+}
