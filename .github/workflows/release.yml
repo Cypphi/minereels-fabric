@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: "25"
+          distribution: temurin
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: Read mod version
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mod_version="$(grep '^mod_version=' gradle.properties | cut -d= -f2-)"
+          echo "mod_version=$mod_version" >> "$GITHUB_OUTPUT"
+
+      - name: Build every Minecraft version
+        run: ./gradlew build
+
+      - name: Prepare release assets
+        shell: bash
+        env:
+          MOD_VERSION: ${{ steps.metadata.outputs.mod_version }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          rm -rf build/release
+          mkdir -p build/release
+          changelog_file="$(mktemp)"
+
+          {
+            printf '# %s\n\n' "MineReels $MOD_VERSION"
+            printf 'Built Minecraft ranges:\n\n'
+          } > build/release/release-notes.md
+
+          for version_dir in versions/*; do
+            minecraft_version="${version_dir#versions/}"
+            minecraft_range="$(grep '^minecraft_range=' "$version_dir/gradle.properties" | cut -d= -f2- || true)"
+            minecraft_range="${minecraft_range:-$minecraft_version}"
+            cp "$version_dir"/build/libs/*"+mc${minecraft_range}.jar" \
+              "build/release/minereels_${MOD_VERSION}-${minecraft_range}.jar"
+            printf -- '- `%s` (built against `%s`)\n' "$minecraft_range" "$minecraft_version" >> build/release/release-notes.md
+          done
+
+          if [[ -n "$BEFORE_SHA" && ! "$BEFORE_SHA" =~ ^0+$ ]] && git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+            git log --format='- %s (`%h`)' "$BEFORE_SHA..$AFTER_SHA" > "$changelog_file"
+          else
+            previous_tag="$(git describe --tags --abbrev=0 "${AFTER_SHA}^" 2>/dev/null || true)"
+            if [[ -n "$previous_tag" ]]; then
+              git log --format='- %s (`%h`)' "$previous_tag..$AFTER_SHA" > "$changelog_file"
+            else
+              git log --max-count=20 --format='- %s (`%h`)' "$AFTER_SHA" > "$changelog_file"
+            fi
+          fi
+
+          {
+            printf '\nChanges:\n\n'
+            if [[ -s "$changelog_file" ]]; then
+              cat "$changelog_file"
+            else
+              printf -- '- No commits found.\n'
+            fi
+          } >> build/release/release-notes.md
+
+      - name: Upload release build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: minereels-${{ steps.metadata.outputs.mod_version }}
+          path: build/release/*.jar
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.metadata.outputs.mod_version }}
+          name: ${{ steps.metadata.outputs.mod_version }}
+          target_commitish: ${{ github.sha }}
+          body_path: build/release/release-notes.md
+          files: build/release/*.jar
+          fail_on_unmatched_files: true
+          prerelease: false
+          make_latest: true
