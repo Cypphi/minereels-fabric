@@ -63,6 +63,10 @@ public final class OverlayConfig {
 	@SerializedName("play-audio")
 	public boolean playAudio = true;
 
+	/** Reel-to-reel vertical scroll animation duration in milliseconds. */
+	@SerializedName("scroll-animation-millis")
+	public double scrollAnimationMillis = 150.0;
+
 	/**
 	 * Instagram session cookie (the full {@code Cookie:} header value from a
 	 * logged-in browser). When blank, the mock feed is used; when set, the real
@@ -88,6 +92,10 @@ public final class OverlayConfig {
 
 	public int videoWidthPixels() {
 		return Math.max(1, (int) Math.round(videoHeightPixels() * 9.0 / 16.0));
+	}
+
+	public int scrollAnimationMillis() {
+		return clamp((int) Math.round(scrollAnimationMillis), 0, 1000);
 	}
 
 	private static OverlayConfig load() {

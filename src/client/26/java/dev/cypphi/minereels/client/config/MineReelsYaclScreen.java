@@ -83,6 +83,12 @@ public final class MineReelsYaclScreen {
 						.binding(720.0, () -> config.videoHeightPixels, v -> config.videoHeightPixels = v)
 						.controller(opt -> DoubleSliderControllerBuilder.create(opt).range(240.0, 1080.0).step(60.0))
 						.build())
+				.option(Option.<Double>createBuilder()
+						.name(Component.literal("Scroll animation (ms)"))
+						.description(OptionDescription.of(Component.literal("Duration of the reel-to-reel vertical scroll animation. Set to 0 to disable.")))
+						.binding(150.0, () -> config.scrollAnimationMillis, v -> config.scrollAnimationMillis = v)
+						.controller(opt -> DoubleSliderControllerBuilder.create(opt).range(0.0, 500.0).step(25.0))
+						.build())
 				.build();
 
 		ConfigCategory tokens = ConfigCategory.createBuilder()

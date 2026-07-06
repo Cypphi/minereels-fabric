@@ -64,6 +64,10 @@ public final class ReelFeedOverlay {
 	private double grabOffsetX = 0;
 	private double grabOffsetY = 0;
 	private boolean chatOpen = false;
+	private int scrollFromIndex = -1;
+	private int scrollToIndex = -1;
+	private int scrollDirection = 0;
+	private long scrollAnimationStartMillis = 0L;
 
 	public ReelFeedOverlay(ReelProvider provider) {
 		this.provider = provider;
@@ -78,11 +82,13 @@ public final class ReelFeedOverlay {
 	public void render(DrawContext context, RenderTickCounter tickCounter) {
 		OverlayConfig config = OverlayConfig.get();
 		if (!config.enabled) {
+			clearScrollAnimation();
 			stopVideo();
 			return;
 		}
 		// Right-click hides the overlay; still show it (dimmed) while chat is open.
 		if (!config.showInHud && !chatOpen) {
+			clearScrollAnimation();
 			stopVideo();
 			return;
 		}
@@ -90,14 +96,15 @@ public final class ReelFeedOverlay {
 		ensureLoaded();
 		Reel reel = current();
 		if (reel == null) {
+			clearScrollAnimation();
 			stopVideo();
 			return;
 		}
 		MinecraftClient client = MinecraftClient.getInstance();
 		Rect rect = currentRect(context.getScaledWindowWidth(), context.getScaledWindowHeight(), config);
 
-		manageVideo(reel);
-		drawCard(context, client, reel, rect, config);
+		manageVideo(playbackReel(reel, config));
+		drawReels(context, client, reel, rect, config, System.currentTimeMillis());
 
 		if (chatOpen) {
 			context.drawStrokedRectangle(rect.x, rect.y, rect.w, rect.h, 0xAAFFFFFF);
@@ -105,12 +112,50 @@ public final class ReelFeedOverlay {
 		}
 	}
 
+	private Reel playbackReel(Reel currentReel, OverlayConfig config) {
+		if (scrollDirection != 0 && config.scrollAnimationMillis() > 0 && scrollFromIndex >= 0
+				&& scrollFromIndex < reels.size() && scrollToIndex == index) {
+			return reels.get(scrollFromIndex);
+		}
+		return currentReel;
+	}
+
+	private void drawReels(DrawContext context, MinecraftClient client, Reel currentReel, Rect rect, OverlayConfig config, long nowMillis) {
+		int animationMillis = config.scrollAnimationMillis();
+		if (scrollDirection == 0 || animationMillis <= 0 || scrollFromIndex < 0
+				|| scrollFromIndex >= reels.size() || scrollToIndex != index) {
+			clearScrollAnimation();
+			drawCard(context, client, currentReel, rect, config);
+			return;
+		}
+
+		double rawProgress = (nowMillis - scrollAnimationStartMillis) / (double) animationMillis;
+		if (rawProgress >= 1.0) {
+			clearScrollAnimation();
+			drawCard(context, client, currentReel, rect, config);
+			return;
+		}
+
+		double progress = easeOutCubic(clampD(rawProgress, 0.0, 1.0));
+		int fromOffset = (int) Math.round(-scrollDirection * progress * rect.h);
+		int toOffset = (int) Math.round(scrollDirection * (1.0 - progress) * rect.h);
+
+		context.enableScissor(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
+		try {
+			drawCard(context, client, reels.get(scrollFromIndex), rect.offsetY(fromOffset), config);
+			drawCard(context, client, currentReel, rect.offsetY(toOffset), config);
+		} finally {
+			context.disableScissor();
+		}
+		context.drawStrokedRectangle(rect.x, rect.y, rect.w, rect.h, 0xFF2A2A32);
+	}
+
 	private void drawCard(DrawContext context, MinecraftClient client, Reel reel, Rect rect, OverlayConfig config) {
 		context.fill(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, 0xCC101014);
 
 		// Video if a frame is ready, otherwise the still cover image.
 		boolean drewVideo = false;
-		if (videoSurface != null && videoSurface.hasFrame()) {
+		if (videoSurface != null && videoSurface.hasFrame() && reel.id().equals(playingId)) {
 			context.drawTexture(RenderPipelines.GUI_TEXTURED, videoSurface.id(),
 					rect.x, rect.y, 0f, 0f, rect.w, rect.h, videoSurface.width(), videoSurface.height(),
 					videoSurface.width(), videoSurface.height());
@@ -257,8 +302,10 @@ public final class ReelFeedOverlay {
 		if (!OverlayConfig.get().enabled) {
 			return;
 		}
+		int oldIndex = index;
 		if (index < reels.size() - 1) {
 			index++;
+			startScrollAnimation(oldIndex, index, 1);
 		}
 		// Infinite feed: prefetch the next page as we approach the end.
 		if (nextCursor != null && index >= reels.size() - 3) {
@@ -270,8 +317,10 @@ public final class ReelFeedOverlay {
 		if (!OverlayConfig.get().enabled) {
 			return;
 		}
+		int oldIndex = index;
 		if (index > 0) {
 			index--;
+			startScrollAnimation(oldIndex, index, -1);
 		}
 	}
 
@@ -441,7 +490,34 @@ public final class ReelFeedOverlay {
 		return Math.max(min, Math.min(max, v));
 	}
 
+	private void startScrollAnimation(int fromIndex, int toIndex, int direction) {
+		if (fromIndex == toIndex || OverlayConfig.get().scrollAnimationMillis() <= 0) {
+			clearScrollAnimation();
+			return;
+		}
+		scrollFromIndex = fromIndex;
+		scrollToIndex = toIndex;
+		scrollDirection = direction;
+		scrollAnimationStartMillis = System.currentTimeMillis();
+	}
+
+	private void clearScrollAnimation() {
+		scrollFromIndex = -1;
+		scrollToIndex = -1;
+		scrollDirection = 0;
+		scrollAnimationStartMillis = 0L;
+	}
+
+	private static double easeOutCubic(double progress) {
+		double inverse = 1.0 - progress;
+		return 1.0 - inverse * inverse * inverse;
+	}
+
 	private record Rect(int x, int y, int w, int h) {
+		Rect offsetY(int dy) {
+			return new Rect(x, y + dy, w, h);
+		}
+
 		boolean contains(double mx, double my) {
 			return mx >= x && my >= y && mx <= x + w && my <= y + h;
 		}

@@ -153,7 +153,8 @@ Config lives in `config/minereels.json` and is editable in the YACL screen.
 volume (%), and X/Y position (%).
 
 **Performance tab:** enable/disable video and audio playback, cap decoded/uploaded
-video FPS, and lower the decoded video height.
+video FPS, lower the decoded video height, and adjust the reel scroll animation
+duration.
 
 **Tokens tab:** your Instagram cookie.
 
