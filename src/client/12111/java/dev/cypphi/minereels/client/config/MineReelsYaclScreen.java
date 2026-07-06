@@ -11,7 +11,7 @@ import dev.isxander.yacl3.api.controller.TickBoxControllerBuilder;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.text.Text;
 
-/** Builds the ModMenu config screen: a General tab and a Tokens tab. */
+/** Builds the ModMenu config screen: General, Performance, and Tokens tabs. */
 public final class MineReelsYaclScreen {
 	private MineReelsYaclScreen() {
 	}
@@ -57,6 +57,34 @@ public final class MineReelsYaclScreen {
 						.build())
 				.build();
 
+		ConfigCategory performance = ConfigCategory.createBuilder()
+				.name(Text.literal("Performance"))
+				.option(Option.<Boolean>createBuilder()
+						.name(Text.literal("Play videos"))
+						.description(OptionDescription.of(Text.literal("When disabled, reels render thumbnails only and no video FFmpeg process is started.")))
+						.binding(true, () -> config.playVideos, v -> config.playVideos = v)
+						.controller(TickBoxControllerBuilder::create)
+						.build())
+				.option(Option.<Boolean>createBuilder()
+						.name(Text.literal("Play audio"))
+						.description(OptionDescription.of(Text.literal("When disabled, the separate audio FFmpeg process is not started.")))
+						.binding(true, () -> config.playAudio, v -> config.playAudio = v)
+						.controller(TickBoxControllerBuilder::create)
+						.build())
+				.option(Option.<Double>createBuilder()
+						.name(Text.literal("Max video FPS"))
+						.description(OptionDescription.of(Text.literal("Caps both FFmpeg decoded frames and render-thread texture uploads.")))
+						.binding(24.0, () -> config.maxVideoFps, v -> config.maxVideoFps = v)
+						.controller(opt -> DoubleSliderControllerBuilder.create(opt).range(5.0, 60.0).step(1.0))
+						.build())
+				.option(Option.<Double>createBuilder()
+						.name(Text.literal("Video height (px)"))
+						.description(OptionDescription.of(Text.literal("Output height for decoded video textures. Lower values reduce CPU copy and GPU upload cost.")))
+						.binding(720.0, () -> config.videoHeightPixels, v -> config.videoHeightPixels = v)
+						.controller(opt -> DoubleSliderControllerBuilder.create(opt).range(240.0, 1080.0).step(60.0))
+						.build())
+				.build();
+
 		ConfigCategory tokens = ConfigCategory.createBuilder()
 				.name(Text.literal("Tokens"))
 				.option(Option.<String>createBuilder()
@@ -73,6 +101,7 @@ public final class MineReelsYaclScreen {
 		return YetAnotherConfigLib.createBuilder()
 				.title(Text.literal("MineReels"))
 				.category(general)
+				.category(performance)
 				.category(tokens)
 				.save(OverlayConfig::save)
 				.build()
