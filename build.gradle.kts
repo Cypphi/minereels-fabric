@@ -22,16 +22,17 @@ val minecraftDependency = findProperty("minecraft_dependency")?.toString() ?: mi
 val fabricDependency = findProperty("fabric_dependency")?.toString() ?: ">=$fabricVersion"
 val javaRelease = findProperty("java_release")?.toString()?.toInt() ?: 21
 val javaDependency = findProperty("java_dependency")?.toString() ?: ">=21"
-val clientSourceSet = findProperty("client_source_set")?.toString() ?: minecraftVersion.filter(Char::isDigit)
+val clientSourceSets = findProperty("client_source_sets")?.toString()
+	?.split(',')
+	?.map(String::trim)
+	?.filter(String::isNotEmpty)
+	?: listOf(minecraftVersion.filter(Char::isDigit))
 
-// YACL + ModMenu aren't published for the 26.x snapshots yet, so the config UI
-// (and its ModMenu entrypoint) is only wired for the older 1.21.x targets.
 val yaclVersion = findProperty("yacl_version")?.toString() ?: ""
 val modmenuVersion = findProperty("modmenu_version")?.toString() ?: ""
 val quiltParsersVersion = findProperty("quilt_parsers_version")?.toString() ?: ""
 val yaclDependency = findProperty("yacl_dependency")?.toString() ?: ">=3.8.2"
 val modmenuDependency = findProperty("modmenu_dependency")?.toString() ?: ">=$modmenuVersion"
-val isMc26 = minecraftVersion.startsWith("26.")
 
 version = "$modVersion+mc$minecraftRange"
 group = mavenGroup
@@ -61,7 +62,7 @@ loom {
 
 	runs {
 		configureEach {
-			runDir("../../run")
+			runDir(rootProject.file("run").absolutePath)
 		}
 	}
 
@@ -87,9 +88,13 @@ dependencies {
 	modImplementation("net.fabricmc:fabric-loader:$loaderVersion")
 	modImplementation("net.fabricmc.fabric-api:fabric-api:$fabricVersion")
 
-	if (!isMc26) {
+	if (yaclVersion.isNotBlank()) {
 		modImplementation("maven.modrinth:yacl:$yaclVersion")
+	}
+	if (modmenuVersion.isNotBlank()) {
 		modImplementation("maven.modrinth:modmenu:$modmenuVersion")
+	}
+	if (quiltParsersVersion.isNotBlank()) {
 		modRuntimeOnly("org.quiltmc.parsers:gson:$quiltParsersVersion")
 		modRuntimeOnly("org.quiltmc.parsers:json:$quiltParsersVersion")
 	}
@@ -97,9 +102,9 @@ dependencies {
 
 sourceSets {
 	named("client") {
-		// Per-version dirs keep mojmap (26.x) and yarn (1.21.x) client code
-		// separate, since the Minecraft class names differ between them.
-		java.setSrcDirs(listOf(rootProject.file("src/client/$clientSourceSet/java")))
+		// Keep shared code grouped by compatible Minecraft client API surface.
+		// 26.x currently shares mojmap client code; 1.21.11 stays separate.
+		java.setSrcDirs(clientSourceSets.map { rootProject.file("src/client/$it/java") })
 	}
 }
 
@@ -111,13 +116,12 @@ tasks.processResources {
 	inputs.property("fabric_dependency", fabricDependency)
 	inputs.property("yacl_dependency", yaclDependency)
 	inputs.property("modmenu_dependency", modmenuDependency)
-	inputs.property("is_mc_26", isMc26)
 
 	filesMatching("fabric.mod.json") {
 		expand(mapOf("version" to project.version))
 	}
 
-	// Set dependency ranges and strip the config UI on targets without YACL.
+	// Set dependency ranges per target version.
 	doLast {
 		val modJson = destinationDir.resolve("fabric.mod.json")
 		@Suppress("UNCHECKED_CAST")
@@ -129,18 +133,8 @@ tasks.processResources {
 		depends["minecraft"] = minecraftDependency
 		depends["java"] = javaDependency
 		depends["fabric-api"] = fabricDependency
-
-		@Suppress("UNCHECKED_CAST")
-		val entrypoints = metadata["entrypoints"] as MutableMap<String, Any?>
-
-		if (isMc26) {
-			entrypoints.remove("modmenu")
-			depends.remove("yet_another_config_lib_v3")
-			depends.remove("modmenu")
-		} else {
-			depends["yet_another_config_lib_v3"] = yaclDependency
-			depends["modmenu"] = modmenuDependency
-		}
+		depends["yet_another_config_lib_v3"] = yaclDependency
+		depends["modmenu"] = modmenuDependency
 
 		modJson.writeText(JsonOutput.prettyPrint(JsonOutput.toJson(metadata)) + "\n")
 	}

@@ -45,7 +45,7 @@ jobs:
           echo "mod_version=$mod_version" >> "$GITHUB_OUTPUT"
 
       - name: Build every Minecraft version
-        run: ./gradlew build
+        run: ./gradlew clean build
 
       - name: Prepare release assets
         shell: bash
@@ -69,8 +69,15 @@ jobs:
             minecraft_version="${version_dir#versions/}"
             minecraft_range="$(grep '^minecraft_range=' "$version_dir/gradle.properties" | cut -d= -f2- || true)"
             minecraft_range="${minecraft_range:-$minecraft_version}"
-            cp "$version_dir"/build/libs/*"+mc${minecraft_range}.jar" \
-              "build/release/minereels_${MOD_VERSION}-${minecraft_range}.jar"
+
+            jar_path="$(find "$version_dir/build/libs" -maxdepth 1 -type f -name "*+mc${minecraft_range}.jar" ! -name '*-sources.jar' | sort | head -n 1)"
+            if [[ -z "$jar_path" ]]; then
+              printf 'Missing release jar for %s (%s)\n' "$minecraft_version" "$minecraft_range" >&2
+              find "$version_dir/build/libs" -maxdepth 1 -type f -name '*.jar' -print >&2
+              exit 1
+            fi
+
+            cp "$jar_path" "build/release/minereels_${MOD_VERSION}-${minecraft_range}.jar"
             printf -- '- `%s` (built against `%s`)\n' "$minecraft_range" "$minecraft_version" >> build/release/release-notes.md
           done
 
