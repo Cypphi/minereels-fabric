@@ -20,8 +20,7 @@ use a throwaway account and expect to refresh it.
 
 ## Requirements
 
-- **Minecraft 1.21.11** with **Fabric Loader** (primary target; see
-  [Versions](#versions)).
+- **Minecraft with Fabric Loader**
 - **Fabric API**.
 - **[YetAnotherConfigLib (YACL)]** and **[Mod Menu]** — for the in-game config
   screen (used to paste your token).
@@ -34,13 +33,65 @@ use a throwaway account and expect to refresh it.
 
 ## Installation
 
-1. Install Fabric Loader for 1.21.11.
+1. Install Fabric Loader.
 2. Drop these into your `mods/` folder: **MineReels**, **Fabric API**,
    **YetAnotherConfigLib**, and **Mod Menu**.
-3. Make sure `ffmpeg` is installed (e.g. `sudo pacman -S ffmpeg`,
-   `apt install ffmpeg`, `brew install ffmpeg`, or the Windows build on PATH).
+3. Make sure `ffmpeg` is installed (Linux/macOS: use your normal package
+   manager; Windows: see below).
 4. Launch the game once so the mod writes its config file, then add your token
    (below).
+
+## Installing ffmpeg on Windows
+
+MineReels launches `ffmpeg.exe` from your system `PATH`. These steps are based
+on [FFmpeg's official download page], which links [gyan.dev Windows builds] for
+ready-to-run Windows executables. gyan.dev says the release essentials build is
+enough for programs that need FFmpeg support and lists the `winget` command
+below.
+
+### Option 1: Windows Package Manager
+
+1. Open **PowerShell**.
+2. Run the gyan.dev package-manager command:
+   ```powershell
+   winget install "FFmpeg (Essentials Build)"
+   ```
+3. Close and reopen your Minecraft launcher.
+4. In a new PowerShell window, check:
+   ```powershell
+   ffmpeg -version
+   ```
+
+Microsoft documents `winget install` and how package queries work in the
+[winget install command reference].
+
+### Option 2: Manual zip install
+
+Use this if `winget` is not available:
+
+1. Download the `ffmpeg-release-essentials.zip` file from
+   [gyan.dev Windows builds].
+2. Extract it somewhere permanent, for example `C:\ffmpeg`.
+3. Make sure `ffmpeg.exe` is inside a `bin` folder, for example
+   `C:\ffmpeg\bin\ffmpeg.exe`.
+4. Add that `bin` folder to your user `Path`. The [PATH variable] is the search
+   list Windows uses when a program starts `ffmpeg` by name:
+   **Start** -> search **Environment Variables** -> **Edit environment variables
+   for your account** -> select **Path** -> **Edit** -> **New** ->
+   `C:\ffmpeg\bin` -> **OK**.
+5. Restart your Minecraft launcher and any open terminals.
+6. Verify with:
+   ```powershell
+   ffmpeg -version
+   ```
+
+Do not put `ffmpeg.exe` in the `mods` folder. It needs to be installed normally
+so the game process can find it by name.
+
+[FFmpeg's official download page]: https://ffmpeg.org/download.html
+[gyan.dev Windows builds]: https://www.gyan.dev/ffmpeg/builds/
+[winget install command reference]: https://learn.microsoft.com/en-us/windows/package-manager/winget/install
+[PATH variable]: https://en.wikipedia.org/wiki/PATH_(variable)
 
 ## Getting your Instagram session cookie
 
