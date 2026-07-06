@@ -44,10 +44,24 @@ jobs:
           mod_version="$(grep '^mod_version=' gradle.properties | cut -d= -f2-)"
           echo "mod_version=$mod_version" >> "$GITHUB_OUTPUT"
 
+      - name: Check release version
+        id: release_gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git rev-parse -q --verify "refs/tags/${{ steps.metadata.outputs.mod_version }}" >/dev/null; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "Version ${{ steps.metadata.outputs.mod_version }} already has a release tag; skipping publish."
+          else
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build every Minecraft version
+        if: ${{ steps.release_gate.outputs.should_release == 'true' }}
         run: ./gradlew clean build
 
       - name: Prepare release assets
+        if: ${{ steps.release_gate.outputs.should_release == 'true' }}
         shell: bash
         env:
           MOD_VERSION: ${{ steps.metadata.outputs.mod_version }}
@@ -102,6 +116,7 @@ jobs:
           } >> build/release/release-notes.md
 
       - name: Upload release build artifacts
+        if: ${{ steps.release_gate.outputs.should_release == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: minereels-${{ steps.metadata.outputs.mod_version }}
@@ -109,6 +124,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub release
+        if: ${{ steps.release_gate.outputs.should_release == 'true' }}
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.metadata.outputs.mod_version }}
@@ -121,6 +137,7 @@ jobs:
           make_latest: true
 
       - name: Check Modrinth configuration
+        if: ${{ steps.release_gate.outputs.should_release == 'true' }}
         id: modrinth
         shell: bash
         env:
@@ -135,7 +152,7 @@ jobs:
           fi
 
       - name: Publish Modrinth versions
-        if: ${{ steps.modrinth.outputs.enabled == 'true' }}
+        if: ${{ steps.release_gate.outputs.should_release == 'true' && steps.modrinth.outputs.enabled == 'true' }}
         shell: bash
         env:
           MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
@@ -149,5 +166,5 @@ jobs:
           done
 
       - name: Skip Modrinth publish
-        if: ${{ steps.modrinth.outputs.enabled != 'true' }}
+        if: ${{ steps.release_gate.outputs.should_release == 'true' && steps.modrinth.outputs.enabled != 'true' }}
         run: echo "Set the MODRINTH_TOKEN secret and MODRINTH_PROJECT_ID secret or repository variable to enable Modrinth publishing."
