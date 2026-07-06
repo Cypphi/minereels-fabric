@@ -142,7 +142,8 @@ All key bindings are rebindable in **Options → Controls → MineReels**.
 
 The feed is infinite — it fetches more reels as you scroll toward the end, like
 the real app. Each reel plays its video with audio (scaled by the volume
-slider); scrolling to a new reel starts it playing.
+slider); scrolling to a new reel starts it playing. If playback hurts game FPS,
+lower the video FPS or decode height in the Performance tab.
 
 ## Configuration
 
@@ -150,6 +151,9 @@ Config lives in `config/minereels.json` and is editable in the YACL screen.
 
 **General tab:** enable/disable the overlay, show/hide in HUD, card size (%),
 volume (%), and X/Y position (%).
+
+**Performance tab:** enable/disable video and audio playback, cap decoded/uploaded
+video FPS, and lower the decoded video height.
 
 **Tokens tab:** your Instagram cookie.
 

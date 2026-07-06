@@ -47,6 +47,22 @@ public final class OverlayConfig {
 	@SerializedName("volume-percent")
 	public double volumePercent = 100.0;
 
+	/** Decode and upload video frames at no more than this FPS. */
+	@SerializedName("max-video-fps")
+	public double maxVideoFps = 24.0;
+
+	/** Height, in pixels, of the decoded 9:16 video texture. */
+	@SerializedName("video-height-pixels")
+	public double videoHeightPixels = 720.0;
+
+	/** When false, only thumbnails are rendered and no video FFmpeg process starts. */
+	@SerializedName("play-videos")
+	public boolean playVideos = true;
+
+	/** When false, the separate audio FFmpeg process is not started. */
+	@SerializedName("play-audio")
+	public boolean playAudio = true;
+
 	/**
 	 * Instagram session cookie (the full {@code Cookie:} header value from a
 	 * logged-in browser). When blank, the mock feed is used; when set, the real
@@ -60,6 +76,18 @@ public final class OverlayConfig {
 			instance = load();
 		}
 		return instance;
+	}
+
+	public int maxVideoFps() {
+		return clamp((int) Math.round(maxVideoFps), 5, 60);
+	}
+
+	public int videoHeightPixels() {
+		return clamp((int) Math.round(videoHeightPixels), 240, 1080);
+	}
+
+	public int videoWidthPixels() {
+		return Math.max(1, (int) Math.round(videoHeightPixels() * 9.0 / 16.0));
 	}
 
 	private static OverlayConfig load() {
@@ -87,5 +115,9 @@ public final class OverlayConfig {
 		} catch (IOException e) {
 			MineReels.LOGGER.warn("Failed to save overlay config", e);
 		}
+	}
+
+	private static int clamp(int value, int min, int max) {
+		return Math.max(min, Math.min(max, value));
 	}
 }

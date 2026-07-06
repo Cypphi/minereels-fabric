@@ -40,8 +40,6 @@ public final class ReelFeedOverlay {
 	private static final double REEL_ASPECT = 16.0 / 9.0; // height / width
 	private static final int PADDING = 6;
 	private static final float TEXT_REF_WIDTH = 180f;
-	private static final int VIDEO_W = 405; // decode resolution (9:16); blit scales to card
-	private static final int VIDEO_H = 720;
 
 	private final ReelProvider provider;
 	private final ReelTextureCache textures = new ReelTextureCache();
@@ -49,9 +47,13 @@ public final class ReelFeedOverlay {
 
 	// Video playback for the currently-shown reel.
 	private String playingId;
+	private String playingUrl;
 	private FfmpegVideoStream videoStream;
 	private FfmpegAudioStream audioStream;
 	private VideoSurface videoSurface;
+	private int playingVideoWidth;
+	private int playingVideoHeight;
+	private int playingMaxVideoFps;
 	private int videoSequence;
 	private int index = 0;
 	private String nextCursor = null;
@@ -323,17 +325,43 @@ public final class ReelFeedOverlay {
 			stopVideo();
 			return;
 		}
-		if (!reel.id().equals(playingId)) {
+		OverlayConfig config = OverlayConfig.get();
+		if (!config.playVideos) {
+			stopVideo();
+			return;
+		}
+
+		int videoWidth = config.videoWidthPixels();
+		int videoHeight = config.videoHeightPixels();
+		int maxVideoFps = config.maxVideoFps();
+		if (!reel.id().equals(playingId) || !url.equals(playingUrl)
+				|| videoStream == null || videoSurface == null
+				|| playingVideoWidth != videoWidth || playingVideoHeight != videoHeight
+				|| playingMaxVideoFps != maxVideoFps) {
 			stopVideo();
 			playingId = reel.id();
-			videoStream = new FfmpegVideoStream(url, VIDEO_W, VIDEO_H);
+			playingUrl = url;
+			playingVideoWidth = videoWidth;
+			playingVideoHeight = videoHeight;
+			playingMaxVideoFps = maxVideoFps;
+			videoStream = new FfmpegVideoStream(url, videoWidth, videoHeight, maxVideoFps);
 			videoStream.start();
-			videoSurface = new VideoSurface(videoStream, VIDEO_W, VIDEO_H, videoSequence++);
-			audioStream = new FfmpegAudioStream(url, () -> OverlayConfig.get().volumePercent / 100.0);
-			audioStream.start();
+			videoSurface = new VideoSurface(videoStream, videoWidth, videoHeight, videoSequence++, maxVideoFps);
 		}
+		manageAudio(url, config);
 		if (videoSurface != null) {
 			videoSurface.uploadIfReady();
+		}
+	}
+
+	private void manageAudio(String url, OverlayConfig config) {
+		if (!config.playAudio || config.volumePercent <= 0.0) {
+			stopAudio();
+			return;
+		}
+		if (audioStream == null) {
+			audioStream = new FfmpegAudioStream(url, () -> OverlayConfig.get().volumePercent / 100.0);
+			audioStream.start();
 		}
 	}
 
@@ -342,15 +370,23 @@ public final class ReelFeedOverlay {
 			videoStream.stop();
 			videoStream = null;
 		}
-		if (audioStream != null) {
-			audioStream.stop();
-			audioStream = null;
-		}
+		stopAudio();
 		if (videoSurface != null) {
 			videoSurface.close();
 			videoSurface = null;
 		}
 		playingId = null;
+		playingUrl = null;
+		playingVideoWidth = 0;
+		playingVideoHeight = 0;
+		playingMaxVideoFps = 0;
+	}
+
+	private void stopAudio() {
+		if (audioStream != null) {
+			audioStream.stop();
+			audioStream = null;
+		}
 	}
 
 	// --- Feed loading --------------------------------------------------------

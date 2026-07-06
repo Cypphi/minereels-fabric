@@ -17,13 +17,12 @@ import java.util.concurrent.locks.ReentrantLock;
  * upload instead of waiting and dropping Minecraft FPS.
  */
 public final class VideoSurface {
-	private static final int MAX_UPLOAD_FPS = 24;
-	private static final long FRAME_INTERVAL_NANOS = 1_000_000_000L / MAX_UPLOAD_FPS;
 	private static final long WORKER_SLEEP_MILLIS = 8L;
 
 	private final int width;
 	private final int height;
 	private final int frameSize;
+	private final long frameIntervalNanos;
 	private final Identifier id;
 	private final NativeImageBackedTexture texture;
 	private final NativeImage image;
@@ -38,11 +37,12 @@ public final class VideoSurface {
 	private long lastUploadNanos = 0L;
 	private final Thread worker;
 
-	public VideoSurface(FfmpegVideoStream stream, int width, int height, int sequence) {
+	public VideoSurface(FfmpegVideoStream stream, int width, int height, int sequence, int maxUploadFps) {
 		this.stream = stream;
 		this.width = width;
 		this.height = height;
 		this.frameSize = width * height * 4;
+		this.frameIntervalNanos = frameIntervalNanos(maxUploadFps);
 		this.texture = new NativeImageBackedTexture(() -> "minereels-video", width, height, false);
 		this.image = texture.getImage();
 		this.id = Identifier.of(MineReels.MOD_ID, "reel_video_" + sequence);
@@ -57,7 +57,7 @@ public final class VideoSurface {
 			byte[] frame = stream.latestFrame();
 			long now = System.nanoTime();
 			if (frame != null && frame != lastConsumed && frame.length >= frameSize
-					&& now - lastFillNanos >= FRAME_INTERVAL_NANOS) {
+					&& now - lastFillNanos >= frameIntervalNanos) {
 				imageLock.lock();
 				try {
 					if (!running) {
@@ -97,7 +97,7 @@ public final class VideoSurface {
 	/** Render-thread: upload the latest filled frame if there is one. */
 	public void uploadIfReady() {
 		long now = System.nanoTime();
-		if (!dirty || now - lastUploadNanos < FRAME_INTERVAL_NANOS || !imageLock.tryLock()) {
+		if (!dirty || now - lastUploadNanos < frameIntervalNanos || !imageLock.tryLock()) {
 			return;
 		}
 		try {
@@ -136,5 +136,9 @@ public final class VideoSurface {
 		} finally {
 			imageLock.unlock();
 		}
+	}
+
+	private static long frameIntervalNanos(int maxUploadFps) {
+		return 1_000_000_000L / Math.max(1, maxUploadFps);
 	}
 }

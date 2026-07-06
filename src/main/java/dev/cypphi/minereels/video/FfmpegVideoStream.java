@@ -16,11 +16,10 @@ import java.util.List;
  * by per-version client code.
  */
 public final class FfmpegVideoStream {
-	private static final int MAX_FPS = 24;
-
 	private final String url;
 	private final int width;
 	private final int height;
+	private final int maxFps;
 	private final int frameSize;
 
 	private volatile byte[] latest;
@@ -28,10 +27,11 @@ public final class FfmpegVideoStream {
 	private Process process;
 	private Thread reader;
 
-	public FfmpegVideoStream(String url, int width, int height) {
+	public FfmpegVideoStream(String url, int width, int height, int maxFps) {
 		this.url = url;
 		this.width = width;
 		this.height = height;
+		this.maxFps = Math.max(1, maxFps);
 		this.frameSize = width * height * 4;
 	}
 
@@ -52,7 +52,7 @@ public final class FfmpegVideoStream {
 					"-an",
 					"-filter_threads", "1",
 					"-f", "rawvideo", "-pix_fmt", "rgba",
-					"-vf", "fps=" + MAX_FPS + ",scale=" + width + ":" + height + ":flags=fast_bilinear",
+					"-vf", "fps=" + maxFps + ",scale=" + width + ":" + height + ":flags=fast_bilinear",
 					"-"))
 					// Discard stderr: on scroll we kill ffmpeg mid-write, which otherwise
 					// spams a harmless "broken pipe" muxer error to the console.
