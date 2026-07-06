@@ -4,6 +4,12 @@
 
 <h1 align="center">MineReels</h1>
 
+<p align="center">
+  <a href="https://discord.gg/W2cEqSf8eK">
+    <img src="https://img.shields.io/badge/Discord-Support-5865F2?logo=discord&logoColor=white" alt="Discord support">
+  </a>
+</p>
+
 Scroll your Instagram Reels feed inside Minecraft from a lightweight Fabric
 client mod — a movable, resizable overlay that plays reels (video + audio)
 right over the HUD.
