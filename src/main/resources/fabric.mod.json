@@ -4,6 +4,7 @@
 	"version": "${version}",
 	"name": "MineReels",
 	"description": "Scroll Instagram Reels in Minecraft.",
+	"icon": "assets/minereels/icon.png",
 	"authors": [
 		"cypphi"
 	],
