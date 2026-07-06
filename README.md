@@ -155,8 +155,6 @@ volume (%), and X/Y position (%).
 
 ## Security & notes
 
-- Your session cookie is a **live credential**. Never share `config/minereels.json`
-  or your logs, and never commit them (both `run/` and `*.har` are gitignored).
 - Using an unofficial client against Instagram violates its ToS and can get an
   account restricted or banned — use a burner and rate-limit your scrolling.
 - Media URLs from Instagram are short-lived and fetched on demand.
