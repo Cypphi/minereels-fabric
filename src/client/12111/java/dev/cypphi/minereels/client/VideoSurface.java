@@ -60,6 +60,9 @@ public final class VideoSurface {
 					&& now - lastFillNanos >= FRAME_INTERVAL_NANOS) {
 				imageLock.lock();
 				try {
+					if (!running) {
+						break;
+					}
 					fill(frame);
 					dirty = true;
 					lastConsumed = frame;
@@ -127,6 +130,11 @@ public final class VideoSurface {
 	public void close() {
 		running = false;
 		worker.interrupt();
-		MinecraftClient.getInstance().getTextureManager().destroyTexture(id);
+		imageLock.lock();
+		try {
+			MinecraftClient.getInstance().getTextureManager().destroyTexture(id);
+		} finally {
+			imageLock.unlock();
+		}
 	}
 }
