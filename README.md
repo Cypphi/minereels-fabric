@@ -1,4 +1,8 @@
-# MineReels
+<p align="center">
+  <img src="src/main/resources/assets/minereels/icon.png" alt="MineReels icon" width="96" height="96">
+</p>
+
+<h1 align="center">MineReels</h1>
 
 Scroll your Instagram Reels feed inside Minecraft from a lightweight Fabric
 client mod — a movable, resizable overlay that plays reels (video + audio)
