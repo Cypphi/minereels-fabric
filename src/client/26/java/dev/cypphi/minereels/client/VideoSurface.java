@@ -15,6 +15,7 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public final class VideoSurface {
 	private static final long WORKER_SLEEP_MILLIS = 8L;
+	private static final long CLOSE_JOIN_MILLIS = 100L;
 
 	private final int width;
 	private final int height;
@@ -60,7 +61,13 @@ public final class VideoSurface {
 					if (!running) {
 						break;
 					}
-					fill(frame);
+					try {
+						fill(frame);
+					} catch (IllegalStateException e) {
+						running = false;
+						MineReels.LOGGER.debug("Stopping video surface fill because the backing image is no longer allocated", e);
+						break;
+					}
 					dirty = true;
 					lastConsumed = frame;
 					lastFillNanos = now;
@@ -98,7 +105,14 @@ public final class VideoSurface {
 		}
 		try {
 			if (dirty) {
-				texture.upload();
+				try {
+					texture.upload();
+				} catch (IllegalStateException e) {
+					running = false;
+					dirty = false;
+					MineReels.LOGGER.debug("Stopping video surface upload because the backing image is no longer allocated", e);
+					return;
+				}
 				dirty = false;
 				lastUploadNanos = now;
 			}
@@ -126,6 +140,11 @@ public final class VideoSurface {
 	public void close() {
 		running = false;
 		worker.interrupt();
+		try {
+			worker.join(CLOSE_JOIN_MILLIS);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
 		imageLock.lock();
 		try {
 			Minecraft.getInstance().getTextureManager().release(id);
