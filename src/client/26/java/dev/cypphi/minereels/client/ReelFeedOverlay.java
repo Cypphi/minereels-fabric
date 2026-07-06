@@ -40,6 +40,17 @@ public final class ReelFeedOverlay {
 	private static final double REEL_ASPECT = 16.0 / 9.0; // height / width
 	private static final int PADDING = 6;
 	private static final float TEXT_REF_WIDTH = 180f;
+	private static final long LIKE_ANIMATION_MILLIS = 560L;
+	private static final String[] PIXEL_HEART = {
+			"011000110",
+			"111101111",
+			"111111111",
+			"111111111",
+			"011111110",
+			"001111100",
+			"000111000",
+			"000010000"
+	};
 
 	private final ReelProvider provider;
 	private final ReelTextureCache textures = new ReelTextureCache();
@@ -67,6 +78,7 @@ public final class ReelFeedOverlay {
 	private int scrollToIndex = -1;
 	private int scrollDirection = 0;
 	private long scrollAnimationStartMillis = 0L;
+	private long likeAnimationStartMillis = 0L;
 
 	public ReelFeedOverlay(ReelProvider provider) {
 		this.provider = provider;
@@ -82,11 +94,13 @@ public final class ReelFeedOverlay {
 		OverlayConfig config = OverlayConfig.get();
 		if (!config.enabled) {
 			clearScrollAnimation();
+			clearLikeAnimation();
 			stopVideo();
 			return;
 		}
 		if (!config.showInHud && !chatOpen) {
 			clearScrollAnimation();
+			clearLikeAnimation();
 			stopVideo();
 			return;
 		}
@@ -95,19 +109,22 @@ public final class ReelFeedOverlay {
 		Reel reel = current();
 		if (reel == null) {
 			clearScrollAnimation();
+			clearLikeAnimation();
 			stopVideo();
 			return;
 		}
 		Minecraft client = Minecraft.getInstance();
 		Rect rect = currentRect(context.guiWidth(), context.guiHeight(), config);
+		long nowMillis = System.currentTimeMillis();
 
 		manageVideo(playbackReel(reel, config));
-		drawReels(context, client, reel, rect, config, System.currentTimeMillis());
+		drawReels(context, client, reel, rect, config, nowMillis);
 
 		if (chatOpen) {
 			fillOutline(context, rect, 0xAAFFFFFF);
 			context.fill(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, config.showInHud ? 0x18FFFFFF : 0x55FF3333);
 		}
+		drawLikeEffect(context, rect, nowMillis);
 	}
 
 	private Reel playbackReel(Reel currentReel, OverlayConfig config) {
@@ -202,6 +219,65 @@ public final class ReelFeedOverlay {
 		context.fill(rect.x, rect.y + rect.h - 1, rect.x + rect.w, rect.y + rect.h, color);
 		context.fill(rect.x, rect.y, rect.x + 1, rect.y + rect.h, color);
 		context.fill(rect.x + rect.w - 1, rect.y, rect.x + rect.w, rect.y + rect.h, color);
+	}
+
+	private void drawLikeEffect(GuiGraphicsExtractor context, Rect rect, long nowMillis) {
+		if (likeAnimationStartMillis == 0L) {
+			return;
+		}
+		double progress = (nowMillis - likeAnimationStartMillis) / (double) LIKE_ANIMATION_MILLIS;
+		if (progress >= 1.0) {
+			clearLikeAnimation();
+			return;
+		}
+
+		double scale = likeScale(progress);
+		double fadeStart = 0.52;
+		double alphaProgress = progress <= fadeStart ? 0.0 : clampD((progress - fadeStart) / (1.0 - fadeStart), 0.0, 1.0);
+		int alpha = clamp((int) Math.round(255.0 * (1.0 - easeInCubic(alphaProgress))), 0, 255);
+		int pixelSize = Math.max(3, Math.min(14, (int) Math.round(rect.w / 34.0)));
+		double unit = pixelSize * scale;
+		double width = PIXEL_HEART[0].length() * unit;
+		double height = PIXEL_HEART.length * unit;
+		double originX = rect.x + rect.w / 2.0 - width / 2.0;
+		double originY = rect.y + rect.h / 2.0 - height / 2.0;
+
+		context.enableScissor(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
+		try {
+			drawPixelHeart(context, originX + unit * 0.35, originY + unit * 0.35, unit, withAlpha(0x000000, (int) (alpha * 0.35)), false);
+			drawPixelHeart(context, originX, originY, unit, withAlpha(0xFFFFFF, (int) (alpha * 0.92)), true);
+			drawPixelHeart(context, originX, originY, unit, withAlpha(0xFF2F55, alpha), false);
+			drawHeartPixel(context, originX, originY, unit, 3, 1, withAlpha(0xFF9CB0, (int) (alpha * 0.95)));
+			drawHeartPixel(context, originX, originY, unit, 4, 1, withAlpha(0xFF9CB0, (int) (alpha * 0.95)));
+		} finally {
+			context.disableScissor();
+		}
+	}
+
+	private void drawPixelHeart(GuiGraphicsExtractor context, double originX, double originY, double unit, int color, boolean outline) {
+		for (int y = -1; y <= PIXEL_HEART.length; y++) {
+			for (int x = -1; x <= PIXEL_HEART[0].length(); x++) {
+				if (outline) {
+					if (heartAt(x, y) || !touchesHeart(x, y)) {
+						continue;
+					}
+				} else if (!heartAt(x, y)) {
+					continue;
+				}
+				drawHeartPixel(context, originX, originY, unit, x, y, color);
+			}
+		}
+	}
+
+	private void drawHeartPixel(GuiGraphicsExtractor context, double originX, double originY, double unit, int x, int y, int color) {
+		if ((color >>> 24) == 0) {
+			return;
+		}
+		int x1 = (int) Math.floor(originX + x * unit);
+		int y1 = (int) Math.floor(originY + y * unit);
+		int x2 = (int) Math.ceil(originX + (x + 1) * unit);
+		int y2 = (int) Math.ceil(originY + (y + 1) * unit);
+		context.fill(x1, y1, x2, y2, color);
 	}
 
 	private float textScale(int cardWidth) {
@@ -340,6 +416,9 @@ public final class ReelFeedOverlay {
 		}
 		boolean newState = !reel.liked();
 		reels.set(index, reel.withLiked(newState));
+		if (newState) {
+			startLikeAnimation();
+		}
 		provider.toggleLike(reel.id(), newState).whenComplete((actualState, error) ->
 				Minecraft.getInstance().execute(() -> applyLikeResult(reel, actualState, error)));
 	}
@@ -493,6 +572,27 @@ public final class ReelFeedOverlay {
 		return Math.max(min, Math.min(max, v));
 	}
 
+	private static int withAlpha(int rgb, int alpha) {
+		return (clamp(alpha, 0, 255) << 24) | (rgb & 0x00FFFFFF);
+	}
+
+	private static boolean heartAt(int x, int y) {
+		return y >= 0 && y < PIXEL_HEART.length
+				&& x >= 0 && x < PIXEL_HEART[y].length()
+				&& PIXEL_HEART[y].charAt(x) == '1';
+	}
+
+	private static boolean touchesHeart(int x, int y) {
+		for (int oy = -1; oy <= 1; oy++) {
+			for (int ox = -1; ox <= 1; ox++) {
+				if (heartAt(x + ox, y + oy)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
 	private void startScrollAnimation(int fromIndex, int toIndex, int direction) {
 		if (fromIndex == toIndex || OverlayConfig.get().scrollAnimationMillis() <= 0) {
 			clearScrollAnimation();
@@ -511,9 +611,42 @@ public final class ReelFeedOverlay {
 		scrollAnimationStartMillis = 0L;
 	}
 
+	private void startLikeAnimation() {
+		likeAnimationStartMillis = System.currentTimeMillis();
+	}
+
+	private void clearLikeAnimation() {
+		likeAnimationStartMillis = 0L;
+	}
+
+	private static double likeScale(double progress) {
+		if (progress < 0.22) {
+			return lerp(0.35, 1.22, easeOutBack(progress / 0.22));
+		}
+		if (progress < 0.45) {
+			return lerp(1.22, 0.96, easeOutCubic((progress - 0.22) / 0.23));
+		}
+		return lerp(0.96, 1.04, easeOutCubic((progress - 0.45) / 0.55));
+	}
+
 	private static double easeOutCubic(double progress) {
 		double inverse = 1.0 - progress;
 		return 1.0 - inverse * inverse * inverse;
+	}
+
+	private static double easeInCubic(double progress) {
+		return progress * progress * progress;
+	}
+
+	private static double easeOutBack(double progress) {
+		double c1 = 1.70158;
+		double c3 = c1 + 1.0;
+		double p = progress - 1.0;
+		return 1.0 + c3 * p * p * p + c1 * p * p;
+	}
+
+	private static double lerp(double start, double end, double progress) {
+		return start + (end - start) * clampD(progress, 0.0, 1.0);
 	}
 
 	private record Rect(int x, int y, int w, int h) {
