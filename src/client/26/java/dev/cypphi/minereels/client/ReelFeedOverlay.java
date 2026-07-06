@@ -1,8 +1,11 @@
 package dev.cypphi.minereels.client;
 
+import dev.cypphi.minereels.MineReels;
 import dev.cypphi.minereels.config.OverlayConfig;
 import dev.cypphi.minereels.reel.Reel;
 import dev.cypphi.minereels.reel.ReelProvider;
+import dev.cypphi.minereels.video.FfmpegAudioStream;
+import dev.cypphi.minereels.video.FfmpegVideoStream;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
 import net.minecraft.client.DeltaTracker;
@@ -12,6 +15,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.renderer.RenderPipelines;
 import org.joml.Matrix3x2fStack;
 import org.lwjgl.glfw.GLFW;
 
@@ -36,9 +40,19 @@ public final class ReelFeedOverlay {
 	private static final double REEL_ASPECT = 16.0 / 9.0; // height / width
 	private static final int PADDING = 6;
 	private static final float TEXT_REF_WIDTH = 180f;
+	private static final int VIDEO_W = 405; // decode resolution (9:16); blit scales to card
+	private static final int VIDEO_H = 720;
 
 	private final ReelProvider provider;
+	private final ReelTextureCache textures = new ReelTextureCache();
 	private final List<Reel> reels = new ArrayList<>();
+
+	// Video playback for the currently-shown reel.
+	private String playingId;
+	private FfmpegVideoStream videoStream;
+	private FfmpegAudioStream audioStream;
+	private VideoSurface videoSurface;
+	private int videoSequence;
 	private int index = 0;
 	private String nextCursor = null;
 	private boolean loading = false;
@@ -61,20 +75,24 @@ public final class ReelFeedOverlay {
 	public void render(GuiGraphicsExtractor context, DeltaTracker tickCounter) {
 		OverlayConfig config = OverlayConfig.get();
 		if (!config.enabled) {
+			stopVideo();
 			return;
 		}
 		if (!config.showInHud && !chatOpen) {
+			stopVideo();
 			return;
 		}
 
 		ensureLoaded();
 		Reel reel = current();
 		if (reel == null) {
+			stopVideo();
 			return;
 		}
 		Minecraft client = Minecraft.getInstance();
 		Rect rect = currentRect(context.guiWidth(), context.guiHeight(), config);
 
+		manageVideo(reel);
 		drawCard(context, client, reel, rect, config);
 
 		if (chatOpen) {
@@ -85,6 +103,24 @@ public final class ReelFeedOverlay {
 
 	private void drawCard(GuiGraphicsExtractor context, Minecraft client, Reel reel, Rect rect, OverlayConfig config) {
 		context.fill(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, 0xCC101014);
+
+		// Video if a frame is ready, otherwise the still cover image.
+		boolean drewVideo = false;
+		if (videoSurface != null && videoSurface.hasFrame()) {
+			context.blit(RenderPipelines.GUI_TEXTURED, videoSurface.id(),
+					rect.x, rect.y, 0f, 0f, rect.w, rect.h,
+					videoSurface.width(), videoSurface.height(), videoSurface.width(), videoSurface.height());
+			drewVideo = true;
+		}
+		if (!drewVideo) {
+			textures.ensure(reel.id(), reel.thumbnailUrl());
+			ReelTextureCache.Entry tex = textures.get(reel.id());
+			if (tex != null) {
+				context.blit(RenderPipelines.GUI_TEXTURED, tex.id(),
+						rect.x, rect.y, 0f, 0f, rect.w, rect.h,
+						tex.width(), tex.height(), tex.width(), tex.height());
+			}
+		}
 		fillOutline(context, rect, 0xFF2A2A32);
 
 		Font font = client.font;
@@ -253,7 +289,68 @@ public final class ReelFeedOverlay {
 		}
 		boolean newState = !reel.liked();
 		reels.set(index, reel.withLiked(newState));
-		provider.toggleLike(reel.id(), newState);
+		provider.toggleLike(reel.id(), newState).whenComplete((actualState, error) ->
+				Minecraft.getInstance().execute(() -> applyLikeResult(reel, actualState, error)));
+	}
+
+	private void applyLikeResult(Reel original, Boolean actualState, Throwable error) {
+		int reelIndex = findReelIndex(original.id());
+		if (reelIndex < 0) {
+			return;
+		}
+		if (error != null) {
+			reels.set(reelIndex, reels.get(reelIndex).withLiked(original.liked()));
+			MineReels.LOGGER.warn("Failed to toggle Instagram like for {}", original.id(), error);
+			return;
+		}
+		reels.set(reelIndex, reels.get(reelIndex).withLiked(Boolean.TRUE.equals(actualState)));
+	}
+
+	private int findReelIndex(String reelId) {
+		for (int i = 0; i < reels.size(); i++) {
+			if (reels.get(i).id().equals(reelId)) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	// --- Video playback ------------------------------------------------------
+
+	private void manageVideo(Reel reel) {
+		String url = reel.videoUrl();
+		if (url == null || url.isBlank()) {
+			stopVideo();
+			return;
+		}
+		if (!reel.id().equals(playingId)) {
+			stopVideo();
+			playingId = reel.id();
+			videoStream = new FfmpegVideoStream(url, VIDEO_W, VIDEO_H);
+			videoStream.start();
+			videoSurface = new VideoSurface(videoStream, VIDEO_W, VIDEO_H, videoSequence++);
+			audioStream = new FfmpegAudioStream(url, () -> OverlayConfig.get().volumePercent / 100.0);
+			audioStream.start();
+		}
+		if (videoSurface != null) {
+			videoSurface.uploadIfReady();
+		}
+	}
+
+	private void stopVideo() {
+		if (videoStream != null) {
+			videoStream.stop();
+			videoStream = null;
+		}
+		if (audioStream != null) {
+			audioStream.stop();
+			audioStream = null;
+		}
+		if (videoSurface != null) {
+			videoSurface.close();
+			videoSurface = null;
+		}
+		playingId = null;
 	}
 
 	// --- Feed loading --------------------------------------------------------

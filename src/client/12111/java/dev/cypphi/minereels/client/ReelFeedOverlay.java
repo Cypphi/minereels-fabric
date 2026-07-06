@@ -1,5 +1,6 @@
 package dev.cypphi.minereels.client;
 
+import dev.cypphi.minereels.MineReels;
 import dev.cypphi.minereels.config.OverlayConfig;
 import dev.cypphi.minereels.reel.Reel;
 import dev.cypphi.minereels.reel.ReelProvider;
@@ -285,7 +286,30 @@ public final class ReelFeedOverlay {
 		}
 		boolean newState = !reel.liked();
 		reels.set(index, reel.withLiked(newState));
-		provider.toggleLike(reel.id(), newState);
+		provider.toggleLike(reel.id(), newState).whenComplete((actualState, error) ->
+				MinecraftClient.getInstance().execute(() -> applyLikeResult(reel, actualState, error)));
+	}
+
+	private void applyLikeResult(Reel original, Boolean actualState, Throwable error) {
+		int reelIndex = findReelIndex(original.id());
+		if (reelIndex < 0) {
+			return;
+		}
+		if (error != null) {
+			reels.set(reelIndex, reels.get(reelIndex).withLiked(original.liked()));
+			MineReels.LOGGER.warn("Failed to toggle Instagram like for {}", original.id(), error);
+			return;
+		}
+		reels.set(reelIndex, reels.get(reelIndex).withLiked(Boolean.TRUE.equals(actualState)));
+	}
+
+	private int findReelIndex(String reelId) {
+		for (int i = 0; i < reels.size(); i++) {
+			if (reels.get(i).id().equals(reelId)) {
+				return i;
+			}
+		}
+		return -1;
 	}
 
 	// --- Video playback ------------------------------------------------------

@@ -2,8 +2,10 @@ package dev.cypphi.minereels.reel;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import dev.cypphi.minereels.MineReels;
 
 import java.net.URI;
@@ -22,6 +24,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -52,6 +55,8 @@ public final class InstagramProvider implements ReelProvider {
 	private static final String FEED_FRIENDLY = "PolarisClipsTabDesktopPaginationQuery";
 	private static final String LIKE_DOC_ID = "27182485238052618";
 	private static final String LIKE_FRIENDLY = "usePolarisLikeMediaXIGLikeMutation";
+	private static final String UNLIKE_DOC_ID = "27345296031770102";
+	private static final String UNLIKE_FRIENDLY = "usePolarisLikeMediaXIGUnlikeMutation";
 	private static final String CONNECTION = "xdt_api__v1__clips__home__connection_v2";
 	private static final int PAGE_SIZE = 10;
 
@@ -60,6 +65,7 @@ public final class InstagramProvider implements ReelProvider {
 	private static final Pattern LSD = Pattern.compile("\"LSD\",\\[],\\{\"token\":\"([^\"]+)\"");
 	private static final Pattern ACTOR = Pattern.compile("\"actorID\":\"(\\d+)\"");
 	private static final Pattern HASTE = Pattern.compile("\"haste_session\":\"([^\"]+)\"");
+	private static final Pattern HSI = Pattern.compile("\"hsi\":\"([^\"]+)\"");
 	private static final Pattern REV = Pattern.compile("\"client_revision\":(\\d+)");
 	private static final Pattern SPIN_T = Pattern.compile("\"__spin_t\":(\\d+)");
 
@@ -81,14 +87,18 @@ public final class InstagramProvider implements ReelProvider {
 	private String lsd;
 	private String actorId;
 	private String hasteSession;
+	private String hsi;
 	private String clientRevision;
 	private String spinT;
+	private final AtomicInteger requestCounter = new AtomicInteger(10);
+	private final AtomicInteger mutationCounter = new AtomicInteger(1);
 
 	// Media ids already shown, echoed back so the feed query doesn't repeat them.
 	private final Set<String> seenReels = new LinkedHashSet<>();
 
 	// pk -> organic_tracking_token from the feed; required to register a like.
 	private final Map<String, String> trackingTokens = new ConcurrentHashMap<>();
+	private final Map<String, String> reelCodes = new ConcurrentHashMap<>();
 
 	public InstagramProvider(String cookie) {
 		this.cookie = cookie;
@@ -113,24 +123,19 @@ public final class InstagramProvider implements ReelProvider {
 	public CompletableFuture<Boolean> toggleLike(String reelId, boolean liked) {
 		return CompletableFuture.supplyAsync(() -> {
 			ensureBootstrapped();
-			// Only a "like" mutation was captured; unlike uses a sibling doc_id we
-			// don't have yet, so for now we only perform the like side.
-			if (!liked) {
-				return false;
-			}
-			// Instagram requires the media's server-signed tracking token for the
-			// like to register; without it the mutation returns ok but no-ops.
 			String token = trackingTokens.get(reelId);
-			String tokenField = token != null ? ",\"tracking_token\":\"" + token + "\"" : "";
-			String vars = "{\"input\":{\"actor_id\":\"" + orEmpty(actorId) + "\",\"client_mutation_id\":\"1\","
-					+ "\"container_module\":\"reels_tab\",\"media_id\":\"" + reelId + "\"" + tokenField + "}}";
-			String body = post(API_GRAPHQL, LIKE_DOC_ID, LIKE_FRIENDLY, vars);
-			boolean ok = body.contains("\"has_liked\":true");
-			if (!ok) {
-				MineReels.LOGGER.warn("Like for {} did not register (response: {})", reelId,
-						body.length() > 200 ? body.substring(0, 200) : body);
+			if (token == null || token.isBlank()) {
+				throw new IllegalStateException("Missing Instagram tracking token for reel " + reelId);
 			}
-			return ok;
+
+			String docId = liked ? LIKE_DOC_ID : UNLIKE_DOC_ID;
+			String friendly = liked ? LIKE_FRIENDLY : UNLIKE_FRIENDLY;
+			String body = post(API_GRAPHQL, docId, friendly, likeVariables(reelId, token, liked), refererFor(reelId));
+			boolean actualState = parseLikedState(body, liked);
+			if (actualState != liked) {
+				MineReels.LOGGER.warn("Instagram returned liked={} after requesting liked={} for {}", actualState, liked, reelId);
+			}
+			return actualState;
 		}, executor);
 	}
 
@@ -145,6 +150,7 @@ public final class InstagramProvider implements ReelProvider {
 		lsd = firstGroup(LSD, html);
 		actorId = firstGroup(ACTOR, html);
 		hasteSession = firstGroup(HASTE, html);
+		hsi = firstGroup(HSI, html);
 		clientRevision = firstGroup(REV, html);
 		spinT = firstGroup(SPIN_T, html);
 		if (fbDtsg == null || lsd == null) {
@@ -156,32 +162,42 @@ public final class InstagramProvider implements ReelProvider {
 	// --- request building ----------------------------------------------------
 
 	private String feedVariables(String cursor) {
-		StringBuilder seen = new StringBuilder();
-		boolean first = true;
+		JsonArray seen = new JsonArray();
 		for (String id : seenReels) {
-			if (!first) {
-				seen.append(",");
-			}
-			seen.append("{\\\"id\\\":\\\"").append(id).append("\\\"}");
-			first = false;
+			JsonObject seenItem = new JsonObject();
+			seenItem.addProperty("id", id);
+			seen.add(seenItem);
 		}
-		String after = cursor != null ? "\"" + cursor + "\"" : "null";
-		return "{\"after\":" + after + ",\"before\":null,\"data\":{\"container_module\":\"clips_tab_desktop_page\","
-				+ "\"seen_reels\":\"[" + seen + "]\"},\"first\":" + PAGE_SIZE + ",\"last\":null,"
-				+ "\"__relay_internal__pv__PolarisReelsRecoDebugOverlayEnabledrelayprovider\":false,"
-				+ "\"__relay_internal__pv__PolarisAIGMMediaWebLabelEnabledrelayprovider\":false}";
+		JsonObject data = new JsonObject();
+		data.addProperty("container_module", "clips_tab_desktop_page");
+		data.addProperty("seen_reels", seen.toString());
+
+		JsonObject variables = new JsonObject();
+		variables.add("after", cursor != null ? new JsonPrimitive(cursor) : JsonNull.INSTANCE);
+		variables.add("before", JsonNull.INSTANCE);
+		variables.add("data", data);
+		variables.addProperty("first", PAGE_SIZE);
+		variables.add("last", JsonNull.INSTANCE);
+		variables.addProperty("__relay_internal__pv__PolarisReelsRecoDebugOverlayEnabledrelayprovider", false);
+		variables.addProperty("__relay_internal__pv__PolarisAIGMMediaWebLabelEnabledrelayprovider", false);
+		return variables.toString();
 	}
 
 	private String post(String endpoint, String docId, String friendlyName, String variables) {
+		return post(endpoint, docId, friendlyName, variables, REELS_PAGE);
+	}
+
+	private String post(String endpoint, String docId, String friendlyName, String variables, String referer) {
 		String rev = orEmpty(clientRevision);
 		String form = "av=" + enc(orEmpty(actorId))
 				+ "&__a=1"
-				+ "&__req=a"
+				+ "&__req=" + enc(nextRequestId())
 				+ "&__hs=" + enc(orEmpty(hasteSession))
 				+ "&dpr=1"
 				+ "&__ccg=EXCELLENT"
 				+ "&__rev=" + enc(rev)
 				+ "&__comet_req=7"
+				+ (hsi != null ? "&__hsi=" + enc(hsi) : "")
 				+ "&fb_dtsg=" + enc(orEmpty(fbDtsg))
 				+ "&jazoest=" + jazoest(orEmpty(fbDtsg))
 				+ "&lsd=" + enc(orEmpty(lsd))
@@ -198,15 +214,20 @@ public final class InstagramProvider implements ReelProvider {
 
 		HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(endpoint))
 				.timeout(Duration.ofSeconds(20))
+				.header("Accept", "*/*")
+				.header("Accept-Language", "en-US,en;q=0.9")
 				.header("Content-Type", "application/x-www-form-urlencoded")
 				.header("User-Agent", USER_AGENT)
 				.header("Cookie", cookie)
-				.header("Referer", REELS_PAGE)
+				.header("Referer", referer)
 				.header("Origin", "https://www.instagram.com")
 				.header("X-IG-App-ID", APP_ID)
+				.header("X-IG-Max-Touch-Points", "0")
 				.header("X-ASBD-ID", ASBD_ID)
 				.header("X-FB-Friendly-Name", friendlyName)
-				.header("X-Requested-With", "XMLHttpRequest");
+				.header("Sec-Fetch-Dest", "empty")
+				.header("Sec-Fetch-Mode", "cors")
+				.header("Sec-Fetch-Site", "same-origin");
 		if (csrfToken != null) {
 			builder.header("X-CSRFToken", csrfToken);
 		}
@@ -225,6 +246,30 @@ public final class InstagramProvider implements ReelProvider {
 				.GET()
 				.build();
 		return send(request);
+	}
+
+	private String likeVariables(String reelId, String trackingToken, boolean liked) {
+		JsonObject input = new JsonObject();
+		input.addProperty("actor_id", orEmpty(actorId));
+		input.addProperty("client_mutation_id", String.valueOf(mutationCounter.getAndIncrement()));
+		if (liked) {
+			input.addProperty("container_module", "reels_tab");
+		}
+		input.addProperty("media_id", reelId);
+		input.addProperty("tracking_token", trackingToken);
+
+		JsonObject variables = new JsonObject();
+		variables.add("input", input);
+		return variables.toString();
+	}
+
+	private String refererFor(String reelId) {
+		String code = reelCodes.get(reelId);
+		return code == null || code.isBlank() ? REELS_PAGE : REELS_PAGE + code + "/";
+	}
+
+	private String nextRequestId() {
+		return Integer.toString(requestCounter.getAndIncrement(), 36);
 	}
 
 	private String send(HttpRequest request) {
@@ -262,6 +307,10 @@ public final class InstagramProvider implements ReelProvider {
 					if (token != null) {
 						trackingTokens.put(reel.id(), token);
 					}
+					String code = asString(media.get("code"));
+					if (code != null) {
+						reelCodes.put(reel.id(), code);
+					}
 				}
 			}
 		}
@@ -271,6 +320,18 @@ public final class InstagramProvider implements ReelProvider {
 		boolean hasNext = pageInfo != null && pageInfo.has("has_next_page") && pageInfo.get("has_next_page").getAsBoolean();
 		String nextCursor = hasNext ? asString(pageInfo.get("end_cursor")) : null;
 		return new ReelPage(reels, nextCursor);
+	}
+
+	private boolean parseLikedState(String body, boolean requestedState) {
+		JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+		JsonObject data = root.getAsJsonObject("data");
+		String key = requestedState ? "xig_media_like" : "xig_media_unlike";
+		JsonObject mutation = data == null ? null : data.getAsJsonObject(key);
+		JsonObject media = mutation == null ? null : mutation.getAsJsonObject("media");
+		if (media != null && media.has("has_liked") && !media.get("has_liked").isJsonNull()) {
+			return media.get("has_liked").getAsBoolean();
+		}
+		throw new IllegalStateException("Unexpected Instagram like response shape");
 	}
 
 	private Reel toReel(JsonObject media) {

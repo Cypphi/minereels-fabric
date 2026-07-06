@@ -21,6 +21,9 @@
 			"dev.cypphi.minereels.client.config.MineReelsModMenu"
 		]
 	},
+	"mixins": [
+		"minereels.mixins.json"
+	],
 	"depends": {
 		"fabricloader": ">=0.19.3",
 		"minecraft": "*",
