@@ -6,6 +6,7 @@ import org.gradle.jvm.tasks.Jar
 plugins {
 	id("dev.kikugie.stonecutter")
 	id("fabric-loom") version "1.17.13"
+	id("com.modrinth.minotaur") version "2.9.0"
 	id("maven-publish")
 }
 
@@ -27,6 +28,11 @@ val clientSourceSets = findProperty("client_source_sets")?.toString()
 	?.map(String::trim)
 	?.filter(String::isNotEmpty)
 	?: listOf(minecraftVersion.filter(Char::isDigit))
+val modrinthGameVersions = findProperty("modrinth_game_versions")?.toString()
+	?.split(',')
+	?.map(String::trim)
+	?.filter(String::isNotEmpty)
+	?: listOf(minecraftVersion)
 
 val yaclVersion = findProperty("yacl_version")?.toString() ?: ""
 val modmenuVersion = findProperty("modmenu_version")?.toString() ?: ""
@@ -159,6 +165,27 @@ java {
 tasks.named<Jar>("jar") {
 	from("LICENSE") {
 		rename { "${it}_${base.archivesName.get()}" }
+	}
+}
+
+modrinth {
+	token.set(providers.environmentVariable("MODRINTH_TOKEN"))
+	projectId.set(providers.environmentVariable("MODRINTH_PROJECT_ID"))
+	versionNumber.set(project.version.toString())
+	versionName.set("MineReels $modVersion for Minecraft $minecraftRange")
+	versionType.set(providers.environmentVariable("MODRINTH_VERSION_TYPE").orElse("alpha"))
+	uploadFile.set(tasks.named("remapJar"))
+	gameVersions.addAll(modrinthGameVersions)
+	loaders.add("fabric")
+	changelog.set(providers.provider {
+		val releaseNotes = rootProject.layout.buildDirectory.file("release/release-notes.md").get().asFile
+		if (releaseNotes.isFile) releaseNotes.readText() else "No changelog was specified."
+	})
+
+	dependencies {
+		required.project("fabric-api")
+		required.project("yacl")
+		required.project("modmenu")
 	}
 }
 

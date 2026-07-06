@@ -119,3 +119,35 @@ jobs:
           fail_on_unmatched_files: true
           prerelease: false
           make_latest: true
+
+      - name: Check Modrinth configuration
+        id: modrinth
+        shell: bash
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          MODRINTH_PROJECT_ID: ${{ secrets.MODRINTH_PROJECT_ID || vars.MODRINTH_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$MODRINTH_TOKEN" && -n "$MODRINTH_PROJECT_ID" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish Modrinth versions
+        if: ${{ steps.modrinth.outputs.enabled == 'true' }}
+        shell: bash
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          MODRINTH_PROJECT_ID: ${{ secrets.MODRINTH_PROJECT_ID || vars.MODRINTH_PROJECT_ID }}
+          MODRINTH_VERSION_TYPE: ${{ vars.MODRINTH_VERSION_TYPE || 'release' }}
+        run: |
+          set -euo pipefail
+          for version_dir in versions/*; do
+            minecraft_version="${version_dir#versions/}"
+            ./gradlew ":${minecraft_version}:modrinth"
+          done
+
+      - name: Skip Modrinth publish
+        if: ${{ steps.modrinth.outputs.enabled != 'true' }}
+        run: echo "Set the MODRINTH_TOKEN secret and MODRINTH_PROJECT_ID secret or repository variable to enable Modrinth publishing."
